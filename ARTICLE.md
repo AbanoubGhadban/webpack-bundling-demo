@@ -270,15 +270,145 @@ This is a real pattern in webpack's output. Look at any webpack bundle and you'l
 
 ### When NOT to Replace an Identifier
 
-The transformer needs to be careful. If you imported a name `add`, not every `add` in the file should be replaced. The transformer skips:
+Here's the problem. Say you wrote:
 
-- **Object property keys**: `{ add: 1 }` — don't touch `add`
-- **Member expression properties**: `obj.add` — don't touch `add`
-- **Variable declarations**: `const add = ...` — don't touch `add`
-- **Function parameters**: `function(add) { ... }` — don't touch `add`
-- **Function/class declaration names**: `function add() {}` — don't touch `add`
+```js
+import { add } from './math.js';
+```
 
-Only free references to the identifier get replaced. This is determined by walking the AST and checking each identifier's parent node.
+The transformer now knows: every reference to `add` should become `_math_.add`. But the word `add` can appear in many places that have **nothing to do with the import**. A naive find-and-replace would destroy the code.
+
+The transformer walks the AST, visits every `Identifier` node, checks if its name matches an imported binding (`add`), and then checks the **parent node** to decide: is this a real reference to the import, or is it something else?
+
+Here are the cases it skips, with concrete examples:
+
+**1. The import declaration itself**
+
+```js
+import { add } from './math.js';
+//       ^^^ This is an Identifier node named "add"
+```
+
+The AST has an `Identifier` node for `add` inside the `ImportSpecifier`. But we're *removing* this entire line — we must not also try to *replace* `add` here. The parent node is `ImportSpecifier`, so we skip it.
+
+**2. Object property keys (non-computed)**
+
+```js
+import { add } from './math.js';
+
+const config = { add: 42 };
+//               ^^^ This "add" is a property KEY, not a reference to the import
+```
+
+If we replaced it, we'd get `{ _math_.add: 42 }` — a syntax error. The parent is a `Property` node and `add` is its `key`, so we skip it.
+
+Note: **computed** property keys ARE replaced, because they're expressions:
+
+```js
+const config = { [add]: 42 };
+//                ^^^ This IS a reference — computed key evaluates the variable
+// Correctly becomes: { [_math_.add]: 42 }
+```
+
+**3. Member expression properties (non-computed)**
+
+```js
+import { add } from './math.js';
+
+console.log(someObject.add);
+//                      ^^^ This "add" is a property ACCESS, not the imported variable
+```
+
+If we replaced it, we'd get `someObject._math_.add` — nonsense. The parent is a `MemberExpression` and `add` is its `property`, so we skip it.
+
+Again, **computed** member access IS replaced:
+
+```js
+someObject[add]
+//          ^^^ This IS a reference — it evaluates to the imported value
+// Correctly becomes: someObject[_math_.add]
+```
+
+**4. Variable declarations (the name being declared)**
+
+```js
+import { add } from './math.js';
+
+function example() {
+  const add = 10;
+  //    ^^^ This is declaring a NEW variable that shadows the import
+}
+```
+
+If we replaced the declaration name, we'd get `const _math_.add = 10` — a syntax error. The parent is a `VariableDeclarator` and `add` is its `id`, so we skip it.
+
+(Inside this function, `add` refers to the local variable `10`, not the import. A real bundler would do full scope analysis to handle shadowing correctly. Our simplified bundler skips the declaration name but would still incorrectly replace usages of `add` inside this function. Webpack's actual implementation uses a full scope analyzer to handle this.)
+
+**5. Function and class declaration names**
+
+```js
+import { add } from './math.js';
+
+function add() { return 1; }
+//       ^^^ Declaring a function named "add" — not a reference to the import
+```
+
+Same idea as variable declarations. Replacing it would give `function _math_.add()` — a syntax error. The parent is `FunctionDeclaration` and `add` is its `id`, so we skip it.
+
+**6. Function parameters**
+
+```js
+import { add } from './math.js';
+
+function compute(add) {
+  //              ^^^ This is a parameter named "add" — shadows the import
+  return add * 2;
+}
+```
+
+Replacing the parameter name would give `function compute(_math_.add)` — a syntax error. The parent is a `FunctionDeclaration`/`ArrowFunctionExpression` and `add` is in its `params` array, so we skip it.
+
+**7. Export specifiers**
+
+```js
+import { add } from './math.js';
+
+export { add };
+//       ^^^ This is inside an ExportSpecifier — handled separately
+```
+
+Export specifiers are handled by the export transformation logic (which generates `defineExports`). We skip them here to avoid double-processing.
+
+**8. Labels**
+
+```js
+import { add } from './math.js';
+
+add: for (let i = 0; i < 10; i++) {
+// ^^^ This is a label, not a reference to the import
+  break add;
+  //    ^^^ Also a label reference
+}
+```
+
+Labels are a separate syntax — they name loops/blocks for `break`/`continue`. Replacing them would give `_math_.add: for (...)` — a syntax error.
+
+---
+
+**So what DOES get replaced?** Only "free references" — places where `add` actually means "read the value of the variable `add`":
+
+```js
+import { add } from './math.js';
+
+add(2, 3);              // ✅ Function call → (0, _math_.add)(2, 3)
+console.log(add);       // ✅ Passing as value → console.log(_math_.add)
+const fn = add;         // ✅ Assigning to variable → const fn = _math_.add
+const arr = [add];      // ✅ Array element → const arr = [_math_.add]
+if (add) { }            // ✅ Condition → if (_math_.add) { }
+const x = add + 1;      // ✅ Expression → const x = _math_.add + 1
+```
+
+The AST makes this possible. A plain text regex could never distinguish `{ add: 1 }` (property key) from `[add]` (value reference) — they're the same string. But in the AST, the first is a `Property` node's `key`, and the second is an `ArrayExpression` element. Different parent nodes, different behavior.
 
 ---
 
