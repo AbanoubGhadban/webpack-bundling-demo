@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Webpack Bundling Demo</title>
+  <style>
+    body {
+      font-family: system-ui, sans-serif;
+      max-width: 600px;
+      margin: 40px auto;
+      padding: 0 20px;
+    }
+    button {
+      padding: 10px 20px;
+      margin: 10px 10px 10px 0;
+      font-size: 16px;
+      cursor: pointer;
+    }
+    p { color: #555; }
+  </style>
+</head>
+<body>
+  <h1>Webpack Bundling Demo</h1>
+  <p>Open the browser console to see output. Static imports run immediately on page load.
+     Click the buttons to trigger dynamic imports (lazy chunk loading).</p>
+  <button id="btn-a">Load Feature A</button>
+  <button id="btn-b">Load Feature B</button>
+  <script src="main.js"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "name": "webpack-bundling-demo",
+  "version": "1.0.0",
+  "description": "Educational JavaScript bundler that produces human-readable output matching webpack's internal architecture",
+  "main": "bundler.js",
+  "scripts": {
+    "build": "node bundler.js --entry ./example/src/index.js --output ./example/dist"
+  },
+  "dependencies": {
+    "acorn": "^8.14.0",
+    "acorn-walk": "^8.3.4",
+    "magic-string": "^0.30.17"
+  }
+}
